@@ -1,19 +1,191 @@
-此代码目的是输入CHEMKIN/Cantera 格式的机理文档、热力学文档，进行处理后输出
+# CHEMKIN 机理预处理模块
 
-首先介绍模块部分：
-Species类主要目的是根据传入的温度判断，利用cal_s_h_cp函数选取合适的NASA多项式系数，并利用该系数计算物种的S/H/Cp。
+本目录包含 CHEMKIN 机理文件与 NASA-7 热力学数据的读取、结构化及热力学/动力学计算代码。主实现位于 `chemkin_mechanism.py`，示例输入为 `grimech30.dat` 和 `thermo30.dat`。
 
-ChemkinReaction类主要目的是抽取Chemkin机理文件，处理其中反应行参数和计算反应的相关速率。
-首先是利用extract_row_params函数，将输入的机理文件在REACTION部分的行进行拆分提取，先拆分出反应的A/N/E，再识别并去除反应式部分的"(+M)"部分,因为"(+M)"的特征会在辅助行里呈现"LOW"，这里先不做处理。如果找到了可逆反应符合"<=>"，就对其按"<=>"分割，再将反应物部分和产物部分分别按"+"分割。进入反应物部分，如果发现了"M"，则该反应式类型为"third_body"，后续再进行第三体的细致分类。继续对反应部分各结构进行拆分，如果首位为数字，记录其负值为化学反应计量数，如果无显式系数，则默认为1，记为-1；对产物部分，同样如此，只是其系数部分为原系数。另外对于反应物和产物中出现相同物种的情况，删去产物化学计量数中此物种的数值，再更改反应物化学计量数中此物种的数值。如果发现不可逆符号"=>"，同样的添加系数。
-对于辅助行的处理，parse_chemkin_aux_line解析主行反应式包含M的行，传入辅助行。如果行包括"LOW"或者"HIGH"，将该类型定义为"fall_off"或者"chem_activate"，分别记录其低温/高温下的A/N/E的值；如果后续行包括"TROE"，则在类型增加"TROE"，提取相关的a/T***/T*参数；同样的，其他类型辅助关键字都同样提取或覆盖。对于没有关键字的行，代表其为普通第三体，则分别提取其物种名和对应效率数值。
-一些检测函数，is_reactant函数用于传入species_name检测是否是反应物中的物种；is_product函数同理；is_in_reaction函数用于检测物种是否参与反应；get_stoichiometric_coefficient函数用于提取物种在反应中的化学计量系数；are_on_opposite_sides函数用于判断两个不同的物种是否分别位于同一化学反应式的左右两侧。
-ReactionThermoKinetics类用于计算焓变、熵变以用于后续计算化学反应速率。
-cal_s函数用于计算一个反应的焓变，利用传入的温度、物种名称得到此时的焓值；后续cal_h函数同样由此计算熵值；cal_k_p函数用于以压力为基准的反应速率常数，主要通过ln Kp = ΔS°/R - ΔH°/(R·T)公式求导；cal_k_c函数由上式计算的k_p和理想气体状态方程计算，得到以浓度为基准的反应速率常数；cal_k_f函数用于计算正向反应速率常数，由A/E/N计算，默认单位改为SI单位；cal_k_r函数由此kf和kc计算逆反应速率常数。
-ChemkinStandardizer类用于将机理文件转化为标准的CHEMKIN/Cantera格式的机理文件、加载机理文件和热力学文件。
-convert_to_standard函数，输入旧文件并输出新文件，首先处理'!'注释行，按原行写入；再是处理元素行和物种行，同样写入；主要的是处理反应行，如果遇到注释的反应行则保留，遇到' = '非标准符合则改为'<=>'，遇到END写入并直接保留后续行。
-load_mechanism函数用于读取CHEMKIN机理文件，并加载元素、物种及反应到字典中。首先读取以"ELEMENTS"开头的，提取其变量名并写入字典中；如果以"SPECIES"开头的行，则提取其物种名，先预处理，将其拆分为元素：数量的字典，写进物种的字典中，同时给出一张保护物性参数的空表供热力学读取后填入；再处理"REACTIONS"开头的行，将反应行给ChemkinReaction类中的extract_row_params函数处理，辅助行给parse_chemkin_aux_line处理。
-load_therm函数用于处理热力学文件，提取标准的NASA 7系数。
-Helps类作用是返回给定的物种名在species中的字典，返回给定的元素在elements中的字典和将大写物种名解析为元素：原子数的字典。
+> **当前状态：开发中的预处理代码。** 文件解析、反应与辅助行归属、单位转换及压力依赖反应计算仍有未完成或待核验部分。本文区分“当前实现”和“预期用途”，不要把所有描述的能力都视为已通过完整验证。
 
-大致处理逻辑为：
-首先将机理文件进行标准化处理，再进行读取机理文件，输出一张元素字典、物种字典和反应物字典，元素字典包含该机理文件中的元素及其元素质量，物种字典包含物种名、元素：原子数、a_H、a_L、T_l、T_m、T_h、此时的温度及其对应的H、S、Cp，反应字典包含反应索引及其；再加载
+## 目录内容
+
+- `chemkin_mechanism.py`：元素/物种结构、单反应解析、CHEMKIN 标准化、机理和热力学数据读取、热力学与速率计算，以及预处理入口。
+- `grimech30.dat`：示例 CHEMKIN 反应机理。
+- `thermo30.dat`：NASA-7 热力学示例数据。
+- `Mechanism_preprocessing/`：预处理结果的默认输出目录；运行入口会尝试写入 `species_check.csv` 和 `reactions_check.csv`。
+
+## 运行方式
+
+在项目环境中运行：
+
+```bash
+python chemkin_mechanism.py
+```
+
+程序会提示输入温度（K）和压力（Pa），直接回车时分别使用代码中的默认值 400 K 和 101325 Pa。输入文件和输出文件使用相对路径，具体解析位置取决于启动程序时的当前工作目录。
+
+⚠️ **运行前检查入口的路径参数**：当前 `__main__` 调用 `MechanismPreprocessing` 时，`mechanism_file_path` 误传为 `therm_file_path`，导致机理读取路径指向 `thermo30.dat`，而不是 `grimech30.dat`。应确认调用使用：
+
+```python
+MechanismPreprocessing(
+    t=temp,
+    pressure=pressure,
+    mechanism_file_path="grimech30.dat",
+    therm_file_path="thermo30.dat",
+).main()
+```
+
+另请确认运行目录中存在这两个输入文件。输出目录由 `Path.mkdir(..., exist_ok=True)` 创建。
+
+## 主要类与职责
+
+### `Element`
+
+根据元素符号建立元素记录，并为代码中显式列出的元素提供原子质量。当前质量表只覆盖 H、C、O、N、F、HE、NE、AR；其他元素的 `Element` 实例可能没有 `mass` 属性，机理读取时会以 `None` 存入元素字典。
+
+### `Species`
+
+使用 NASA-7 系数，在给定温度下计算单个物种的标准熵 `S`、焓 `H` 和热容 `Cp`：
+
+- 输入温度单位：K。
+- `a_L`、`a_H`：低温和高温区各 7 个 NASA 系数。
+- 输出单位：`H` 为 J/mol；`S`、`Cp` 为 J/(mol·K)。
+- 温度区间选择：`T_l <= T < T_m` 使用低温系数；`T_m <= T <= T_h` 使用高温系数。
+
+`Species` 是计算器对象；读取文件后长期保存的物种数据则是 `ChemkinStandardizer.species` 中的字典记录，两种表示不要混淆。
+
+### `ChemkinReaction`
+
+解析一条反应主行，当前保存：
+
+- 主行阿伦尼乌斯参数 `A`、`N`、`E`；
+- 原始反应表达式；
+- 反应物/产物名称及计量系数列表；
+- 辅助行解析所需的临时属性。
+
+`extract_row_params()` 将反应物计量系数记为负数、产物记为正数，并尝试处理两侧同名物种的净抵消。独立的 `M` token 会被跳过并将 `type` 设为 `third_body`；`(+M)` 会在拆分前移除，但当前解析器不会仅凭 `(+M)` 设置类型。
+
+**当前限制**：首字符系数解析只支持 1–9 的单字符整数，不支持多位数或小数；同名物种净抵消的实现有已知边界问题，可能影响净系数和反应级数。
+
+### `ChemkinStandardizer`
+
+负责读取并组织机理数据：
+
+- `convert_to_standard()`：尝试大写化、跳过区块空行，并将反应行中的 ` = ` 替换为 `<=>`。
+- `load_mechanism()`：读取元素、物种和反应，生成三个容器：
+  - `elements`：元素符号到元素信息字典的映射；
+  - `species`：物种名到物种信息字典的映射；
+  - `reactions`：反应记录字典组成的列表。
+- `load_therm()`：根据 NASA-7 固定列格式，为物种字典填入温度范围及 `a_L`、`a_H` 系数。
+
+物种字典示例：
+
+```python
+{
+    "H2": {
+        "name": "H2",
+        "elements": {"H": 2},
+        "a_L": [...],
+        "a_H": [...],
+        "T_l": 200.0,
+        "T_m": 1000.0,
+        "T_h": 3500.0,
+        "T": None,
+        "H": None,
+        "S": None,
+        "Cp": None,
+    }
+}
+```
+
+反应记录示例：
+
+```python
+{
+    "index": 0,
+    "equation": "H2+O2<=>2OH",
+    "reversibility": "reversible",
+    "net_stoic": {"H2": -1, "O2": -1, "OH": 2},
+    "rate_model": "elementary",
+    "third_body": {"enabled": False, "efficiencies": {}},
+    "arrhenius": {"A": ..., "N": ..., "E": ..., "E_unit": "cal/mol"},
+    "low_pressure": {},
+    "high_pressure": {},
+    "broadening": {},
+    "plog": [],
+    "chebyshev": None,
+    "duplicate": False,
+    "reverse_arrhenius": None,
+    "raw_aux_lines": [],
+    "evaluations": [],
+}
+```
+
+`evaluations` 用于保存不同温度/压力下的计算结果，例如 `delta_S_J_per_mol_K`、`delta_H_J_per_mol`、`Kp_dimensionless`、`Kc`、`kf`、`kr`。
+
+### `ReactionThermoKinetics`
+
+针对一条反应记录及给定温度，计算：
+
+1. `cal_s_h()`：按净计量系数计算 `ΔS` 和 `ΔH`；
+2. `cal_k_p()`：使用 `ln Kp = ΔS/R - ΔH/(RT)` 得到无量纲热力学平衡常数；
+3. `cal_k_c()`：将 `Kp` 换算为基于 SI 浓度（mol/m³）的 `Kc`；
+4. `cal_k_f()`：根据修正 Arrhenius 表达式计算正向速率常数；
+5. `cal_k_r()`：按 `kr = kf/Kc` 计算逆向速率常数。
+
+热力学求和要求物种的 `H`、`S` 已先按相同温度计算。推荐调用顺序为：
+
+```python
+calculator.cal_s_h()
+calculator.cal_k_p()
+calculator.cal_k_c()
+calculator.cal_k_f()
+calculator.cal_k_r()
+```
+
+## 辅助行与压力依赖反应
+
+`parse_chemkin_aux_line()` 当前识别或处理：
+
+- `LOW/`：低压极限 Arrhenius 参数；
+- `HIGH/`：高压极限 Arrhenius 参数；
+- `TROE/`：Troe 展宽参数；
+- `SRI/`：解析 3 或 5 个参数；
+- `DUPLICATE`、`REV/`：当前主要记录类型标记；
+- 其他斜杠行：按第三体效率行解析物种名和效率。
+
+`load_mechanism()` 会将辅助行信息并入当前反应记录，但这一逻辑仍在完善中。普通第三体效率应保存在：
+
+```python
+reaction_record["third_body"]["efficiencies"] = {
+    "H2": 0.0,
+    "CH4": 2.0,
+    "AR": 0.63,
+}
+```
+
+显式的零效率是有效数据，应保留；未列出的物种默认效率为 1。`TROE`/`SRI` 是 fall-off 展宽数据，不等同于普通第三体效率表。
+
+**尚未完整实现或验证**：PLOG 与 CHEB 数据解析及速率计算；由 LOW、TROE/SRI、压力和有效第三体浓度共同计算完整 fall-off 速率；所有辅助行类型在同一反应记录上的稳定归属；重复反应和显式 REV 参数的完整数值处理。
+
+## 单位约定与当前风险
+
+- NASA-7 计算结果为 SI 热力学单位：`H` J/mol，`S`、`Cp` J/(mol·K)。
+- CHEMKIN 默认活化能通常为 cal/mol；`cal_k_f()` 当前按默认值乘 4.184 转成 J/mol，与 `R=8.314 J/(mol·K)` 配套。机理文件中的 `UNITS` 声明尚未完整解析。
+- `A` 的单位依赖反应级数及 CHEMKIN 浓度单位。当前 `cal_k_f()` 根据净计量字典的反应物负系数估算单位转换阶数；同名物种抵消、显式反应级数、普通第三体和 fall-off/LOW 参数都可能使估算不准确。
+- 当前 `cal_k_f()` 对 fall-off 主行参数未完成压力修正；其结果可能只是高压极限速率，不能一概视为完整的压力相关速率常数。
+- `Kc` 的单位随净气相计量变化；输出记录中的 `Kc_unit`、`kf_unit`、`kr_unit` 尚未自动推导。
+
+## 输出
+
+`MechanismPreprocessing.main()` 会读取机理与热力学数据、按指定温度计算物种热力学量和反应计算结果，并写出：
+
+- `species_check.csv`：物种数据；
+- `reactions_check.csv`：反应定义及 `evaluations` 计算结果。
+
+CSV 适合人工检查；嵌套字典/列表会被序列化为单元格文本。如需供其他程序无损读取，建议额外输出 JSON。
+
+## 当前已知限制
+
+- `convert_to_standard()` 会将行内容大写；注释保留行为与“原样保留”的描述不完全一致。其输入输出同路径风险、编码和缺少 `END` 的处理也需谨慎。
+- `load_mechanism()` / `load_therm()` 对区块标题、注释、END 标记及异常文件的边界处理仍需加强；输入应先确认符合预期 CHEMKIN/NASA-7 固定列格式。
+- `parse_formula()` 对全大写物种名逐字符解析，不能可靠区分双字母元素（如 `AR`），也不完整支持括号、异构体后缀和复杂物种命名；元素组成结果需核验。
+- 反应与辅助行识别以当前示例机理格式为目标，未覆盖全部 CHEMKIN 扩展关键字。
+- 建议对实际使用的机理文件运行后核对元素/物种数、NASA 系数长度（每个温度区 7 个）、净计量数、辅助行参数和速率单位。
