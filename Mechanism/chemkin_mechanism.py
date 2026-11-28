@@ -872,6 +872,8 @@ class ChemkinStandardizer:
                     "reverse_arrhenius": None,  # REV 参数
                     "raw_aux_lines": [],
                     "evaluations": [],
+                    "rate_net": [],
+                    "rate_rev": [],
                 }
                 self.reactions.append(reaction_record)
                 current_reaction = reaction_record
@@ -926,6 +928,8 @@ class ChemkinStandardizer:
                     "reverse_arrhenius": None,  # REV 参数
                     "raw_aux_lines": [],
                     "evaluations": [],
+                    "rate_net": [],
+                    "rate_rev": [],
                 }
                 self.reactions.append(reaction_record)
                 current_reaction = reaction_record
@@ -1090,86 +1094,3 @@ class Helps:
             # 其他字符（小写字母单独出现、括号等）跳过
             i += 1
         return element_counts
-
-
-import pandas as pd
-from pathlib import Path
-
-class MechanismPreprocessing:
-    def __init__(self, t, pressure, mechanism_file_path, therm_file_path,
-                 output_file_path_species="./Mechanism_preprocessing/species_check.csv",
-                 output_file_path_reactions="./Mechanism_preprocessing/reactions_check.csv"
-                 ):
-        self.T = t
-        self.P = pressure
-        self.mechanism_file_path = mechanism_file_path
-        self.therm_file_path = therm_file_path
-        self.output_file_path_species = output_file_path_species
-        self.output_file_path_reactions = output_file_path_reactions
-
-
-    def main(self):
-        a = ChemkinStandardizer(mech_file_path=self.mechanism_file_path, therm_file_path=self.therm_file_path)
-        #a.convert_to_standard() #标准处理，按需选用
-        a.load_mechanism()
-        a.load_therm()
-        species = a.species.copy()
-        reactions = a.reactions.copy()
-
-        for specie in species.values():
-            b = Species(temp=self.T, temp_low=specie['T_l'], temp_high=specie['T_h']
-                        , temp_mid=specie['T_m'], a_l=specie['a_L'], a_h=specie['a_H'])
-            b.cal_s_h_cp()
-            specie['T'] = self.T
-            specie['S'] = b.S
-            specie['H'] = b.H
-            specie['Cp'] = b.Cp
-
-        for i in range(len(reactions)):
-            reaction = reactions[i]
-            c = ReactionThermoKinetics(temp=self.T, reactions=reaction, species=species, third_type=reaction['rate_model'],
-                                       a=reaction['arrhenius']['A'], n=reaction['arrhenius']['N'], e=reaction['arrhenius']['E'])
-            c.cal_s_h()
-            c.cal_k_p()
-            c.cal_k_c()
-            c.cal_k_f()
-            c.cal_k_r()
-            evaluation = {
-                "temperature_K": self.T,
-                "pressure_Pa": self.P,
-
-                "delta_S_J_per_mol_K": c.delt_S,
-                "delta_H_J_per_mol": c.delt_H,
-
-                "Kp_dimensionless": c.kp,
-                "Kc": c.kc,
-                "Kc_unit": None,  # 根据 Δn 和浓度单位确定
-
-                "kf": c.kf,
-                "kf_unit": None,  # 速率级数及浓度单位确定后填写
-                "kr": c.kr,
-                "kr_unit": None,
-            }
-            reaction["evaluations"].append(evaluation)
-
-        reactions_df = pd.DataFrame(a.reactions)
-        species_df = pd.DataFrame(a.species)
-        reactions_df.index.name = "symbol"
-        species_df.index.name = "symbol"
-        output_path_reactions = Path(self.output_file_path_reactions)
-        output_path_species = Path(self.output_file_path_species)
-        output_path_reactions.parent.mkdir(parents=True, exist_ok=True)
-        output_path_species.parent.mkdir(parents=True, exist_ok=True)
-        reactions_df.to_csv(output_path_reactions, encoding="utf-8-sig")
-        species_df.to_csv(output_path_species, encoding="utf-8-sig")
-
-if __name__ == "__main__":
-    temp_input = input('Please enter the temperature in Kelvin (default 400): ')
-    temp = float(temp_input) if temp_input.strip() else 400.0
-    pressure_input = input('Please enter the pressure in Pa (default 101325): ')
-    pressure = float(pressure_input) if pressure_input.strip() else 101325.0
-    mechanism_file_path = "grimech30.dat"
-    therm_file_path = "thermo30.dat"
-
-    MechanismPreprocessing(t=temp, pressure=pressure
-    , mechanism_file_path=therm_file_path, therm_file_path=therm_file_path).main()

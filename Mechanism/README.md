@@ -1,14 +1,14 @@
 # CHEMKIN 机理预处理模块
 
-本目录包含 CHEMKIN 机理文件与 NASA-7 热力学数据的读取、结构化及热力学/动力学计算代码。主实现位于 `chemkin_mechanism.py`，示例输入为 `grimech30.dat` 和 `thermo30.dat`。
+本目录包含 CHEMKIN 机理文件与 NASA-7 热力学数据的读取、结构化及热力学/动力学计算代码。主实现位于 `chemkin_mechanism.py`，示例输入为 `DataFile/grimech30.dat` 和 `DataFile/thermo30.dat`。
 
 > **当前状态：开发中的预处理代码。** 文件解析、反应与辅助行归属、单位转换及压力依赖反应计算仍有未完成或待核验部分。本文区分“当前实现”和“预期用途”，不要把所有描述的能力都视为已通过完整验证。
 
 ## 目录内容
 
 - `chemkin_mechanism.py`：元素/物种结构、单反应解析、CHEMKIN 标准化、机理和热力学数据读取、热力学与速率计算，以及预处理入口。
-- `grimech30.dat`：示例 CHEMKIN 反应机理。
-- `thermo30.dat`：NASA-7 热力学示例数据。
+- `DataFile/grimech30.dat`：示例 CHEMKIN 反应机理。
+- `DataFile/thermo30.dat`：NASA-7 热力学示例数据。
 - `Mechanism_preprocessing/`：预处理结果的默认输出目录；运行入口会尝试写入 `species_check.csv` 和 `reactions_check.csv`。
 
 ## 运行方式
@@ -21,14 +21,14 @@ python chemkin_mechanism.py
 
 程序会提示输入温度（K）和压力（Pa），直接回车时分别使用代码中的默认值 400 K 和 101325 Pa。输入文件和输出文件使用相对路径，具体解析位置取决于启动程序时的当前工作目录。
 
-⚠️ **运行前检查入口的路径参数**：当前 `__main__` 调用 `MechanismPreprocessing` 时，`mechanism_file_path` 误传为 `therm_file_path`，导致机理读取路径指向 `thermo30.dat`，而不是 `grimech30.dat`。应确认调用使用：
+⚠️ **运行前检查入口的路径参数**：当前 `__main__` 调用 `MechanismPreprocessing` 时，`mechanism_file_path` 误传为 `therm_file_path`，导致机理读取路径指向 `DataFile/thermo30.dat`，而不是 `DataFile/grimech30.dat`。应确认调用使用：
 
 ```python
 MechanismPreprocessing(
-    t=temp,
-    pressure=pressure,
-    mechanism_file_path="grimech30.dat",
-    therm_file_path="thermo30.dat",
+  t=temp,
+  pressure=pressure,
+  mechanism_file_path="DataFile/grimech30.dat",
+  therm_file_path="DataFile/thermo30.dat",
 ).main()
 ```
 
